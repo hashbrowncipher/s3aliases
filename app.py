@@ -14,6 +14,7 @@ import traceback
 
 from botocore.history import get_global_history_recorder
 
+
 class HistoryHandler:
     @staticmethod
     def emit(event_type, payload, source):
@@ -23,6 +24,7 @@ class HistoryHandler:
         pprint(payload)
         print()
 
+
 recorder = get_global_history_recorder()
 recorder.enable()
 recorder.add_handler(HistoryHandler)
@@ -31,33 +33,21 @@ recorder.add_handler(HistoryHandler)
 serialize = TypeSerializer().serialize
 deserialize = TypeDeserializer().deserialize
 
+
 def make_ddb(**kwargs):
-    return {
-        k: serialize(v)
-        for (k, v)
-        in kwargs.items()
-    }
+    return {k: serialize(v) for (k, v) in kwargs.items()}
+
 
 def unmake_ddb(item):
-    return {
-        k: deserialize(v)
-        for (k, v)
-        in item.items()
-    }
+    return {k: deserialize(v) for (k, v) in item.items()}
 
 
 def make_eav(**kwargs):
-    return {
-        (":" + k): serialize(v)
-        for (k, v)
-        in kwargs.items()
-    }
+    return {(":" + k): serialize(v) for (k, v) in kwargs.items()}
+
 
 def make_op(op, **kwargs):
-    return {
-        op : dict(**kwargs)
-    }
-
+    return {op: dict(**kwargs)}
 
 
 DYNAMO = client("dynamodb")
@@ -68,8 +58,10 @@ DYNAMO_DENTRIES = Table("s3aliases_dentries")
 DYNAMO_INODE_OWNERS = Table("s3aliases_inode_owners")
 DYNAMO_INODES = Table("s3aliases_inodes")
 
+
 def make_inode():
     return urandom(24)
+
 
 def format_inode(s):
     return urlsafe_b64encode(s).decode()
@@ -81,7 +73,9 @@ def delete_object(key):
         return
 
     if "inode" in existing:
-        actions, deleted_inode = _actions_to_update_existing_dentry(key, existing["inode"], None)
+        actions, deleted_inode = _actions_to_update_existing_dentry(
+            key, existing["inode"], None
+        )
         DYNAMO.transact_write_items(TransactItems=actions)
         if deleted_inode:
             _cleanup_inode(deleted_inode)
@@ -97,58 +91,73 @@ def _actions_to_update_existing_dentry(key, current_inode, new_inode):
     refcount = int(inode_metadata["refcount"])
 
     if new_inode is None:
-        ret.append(make_op("Update", 
-            TableName="s3aliases_dentries",
-            Key=make_ddb(key=key),
-            UpdateExpression="REMOVE inode",
-            ConditionExpression="inode = :old_inode",
-            ExpressionAttributeValues=make_eav(
-                old_inode=current_inode,
-            ),
-        ))
+        ret.append(
+            make_op(
+                "Update",
+                TableName="s3aliases_dentries",
+                Key=make_ddb(key=key),
+                UpdateExpression="REMOVE inode",
+                ConditionExpression="inode = :old_inode",
+                ExpressionAttributeValues=make_eav(
+                    old_inode=current_inode,
+                ),
+            )
+        )
     else:
-        ret.append(make_op("Update", 
-            TableName="s3aliases_dentries",
-            Key=make_ddb(key=key),
-            UpdateExpression="SET inode = :new_inode",
-            ConditionExpression="inode = :old_inode",
-            ExpressionAttributeValues=make_eav(
-                old_inode=current_inode,
-                new_inode=new_inode,
-            ),
-        ))
+        ret.append(
+            make_op(
+                "Update",
+                TableName="s3aliases_dentries",
+                Key=make_ddb(key=key),
+                UpdateExpression="SET inode = :new_inode",
+                ConditionExpression="inode = :old_inode",
+                ExpressionAttributeValues=make_eav(
+                    old_inode=current_inode,
+                    new_inode=new_inode,
+                ),
+            )
+        )
 
-
-    ret.append(make_op("Delete",
-        TableName="s3aliases_inode_owners",
-        Key=make_ddb(inode=current_inode, dentry=key),
-    ))
+    ret.append(
+        make_op(
+            "Delete",
+            TableName="s3aliases_inode_owners",
+            Key=make_ddb(inode=current_inode, dentry=key),
+        )
+    )
 
     if refcount == 1:
         deleted_inode = current_inode
-        ret.append(make_op("Update",
-            TableName="s3aliases_inodes",
-            Key=make_ddb(inode=current_inode),
-            ExpressionAttributeValues=make_eav(
-                deletable="t",
-                old_refcount = 1,
-            ),
-            UpdateExpression="REMOVE refcount SET deletable = :deletable",
-            ConditionExpression="refcount = :old_refcount",
-        ))
+        ret.append(
+            make_op(
+                "Update",
+                TableName="s3aliases_inodes",
+                Key=make_ddb(inode=current_inode),
+                ExpressionAttributeValues=make_eav(
+                    deletable="t",
+                    old_refcount=1,
+                ),
+                UpdateExpression="REMOVE refcount SET deletable = :deletable",
+                ConditionExpression="refcount = :old_refcount",
+            )
+        )
     else:
-        ret.append(make_op("Update",
-            TableName="s3aliases_inodes",
-            Key=make_ddb(inode=current_inode),
-            ExpressionAttributeValues=make_eav(
-                refcount = refcount - 1,
-                old_refcount = refcount,
-            ),
-            UpdateExpression="SET refcount = :refcount",
-            ConditionExpression="refcount = :old_refcount",
-        ))
+        ret.append(
+            make_op(
+                "Update",
+                TableName="s3aliases_inodes",
+                Key=make_ddb(inode=current_inode),
+                ExpressionAttributeValues=make_eav(
+                    refcount=refcount - 1,
+                    old_refcount=refcount,
+                ),
+                UpdateExpression="SET refcount = :refcount",
+                ConditionExpression="refcount = :old_refcount",
+            )
+        )
 
     return ret, deleted_inode
+
 
 def _purge_dentry_cache(key, existing):
     version_id = existing["cache_versionid"]
@@ -157,7 +166,7 @@ def _purge_dentry_cache(key, existing):
     DYNAMO_DENTRIES.delete_item(
         Key=dict(key=key),
         ExpressionAttributeValues={":version": version_id},
-        ConditionExpression="attribute_not_exists(inode) AND cache_versionid = :version"
+        ConditionExpression="attribute_not_exists(inode) AND cache_versionid = :version",
     )
 
 
@@ -182,6 +191,7 @@ def _populate_dentry_cache(key, existing):
         ConditionExpression="attribute_not_exists(cache_versionid)",
     )
 
+
 def _put_inode_for_key(key, inode, *, copy: bool):
     deleted_inode = None
     existing = DYNAMO_DENTRIES.get_item(Key=dict(key=key)).get("Item")
@@ -193,40 +203,54 @@ def _put_inode_for_key(key, inode, *, copy: bool):
             # Nothing to do!
             return
 
-        sub_actions, deleted_inode = _actions_to_update_existing_dentry(key, existing_inode, inode)
+        sub_actions, deleted_inode = _actions_to_update_existing_dentry(
+            key, existing_inode, inode
+        )
         actions.extend(sub_actions)
     else:
         if existing:
             _purge_dentry_cache(key, existing)
 
-        actions.append(make_op("Put", 
-            TableName="s3aliases_dentries",
-            Item=make_ddb(key=key, inode=inode),
-            ExpressionAttributeNames={"#key": "key"},
-            ConditionExpression="attribute_not_exists(#key)",
-        ))
+        actions.append(
+            make_op(
+                "Put",
+                TableName="s3aliases_dentries",
+                Item=make_ddb(key=key, inode=inode),
+                ExpressionAttributeNames={"#key": "key"},
+                ConditionExpression="attribute_not_exists(#key)",
+            )
+        )
 
     if copy:
         # The inode already exists; increment its refcount
-        actions.append(make_op("Update",
-            TableName="s3aliases_inodes",
-            Key=make_ddb(inode=inode),
-            ExpressionAttributeValues=make_eav(delta = 1),
-            UpdateExpression="SET refcount = refcount + :delta",
-        ))
+        actions.append(
+            make_op(
+                "Update",
+                TableName="s3aliases_inodes",
+                Key=make_ddb(inode=inode),
+                ExpressionAttributeValues=make_eav(delta=1),
+                UpdateExpression="SET refcount = refcount + :delta",
+            )
+        )
     else:
         # inode doesn't exist; create a row for it
-        actions.append(make_op("Put",
-            TableName="s3aliases_inodes",
-            Item=make_ddb(inode=inode, refcount=1),
-            ConditionExpression="attribute_not_exists(inode)",
-        ))
+        actions.append(
+            make_op(
+                "Put",
+                TableName="s3aliases_inodes",
+                Item=make_ddb(inode=inode, refcount=1),
+                ConditionExpression="attribute_not_exists(inode)",
+            )
+        )
 
     # record the existence of a new dentry owning this inode
-    actions.append(make_op("Put",
-        TableName="s3aliases_inode_owners",
-        Item=make_ddb(inode=inode, dentry=key),
-    ))
+    actions.append(
+        make_op(
+            "Put",
+            TableName="s3aliases_inode_owners",
+            Item=make_ddb(inode=inode, dentry=key),
+        )
+    )
 
     # Raises a TransactionCanceledException when the conditions fail, or in
     # other circumstances.
@@ -243,7 +267,6 @@ def _put_inode_for_key(key, inode, *, copy: bool):
 def _cleanup_inode(inode):
     s3_inode(bytes(inode)).delete()
     DYNAMO_INODES.delete_item(Key=dict(inode=inode))
-
 
 
 def put_object(key):
@@ -263,7 +286,7 @@ def _get_inode_for_key(key):
     except KeyError:
         return None
 
-    #TODO: handle when item["inode"] is None
+    # TODO: handle when item["inode"] is None
     return bytes(item["inode"])
 
 
@@ -289,21 +312,17 @@ def chunks(xs, n):
 def _fetch_dentries_chunk(chunk):
     resp = DYNAMO.batch_get_item(
         RequestItems=dict(
-            s3aliases_dentries=dict(
-                Keys=[
-                    make_ddb(key=key)
-                    for key
-                    in chunk
-                ]
-            )
+            s3aliases_dentries=dict(Keys=[make_ddb(key=key) for key in chunk])
         )
     )
 
-    return dict((
-        (item["key"], bytes(item["inode"]))
-        for item
-        in map(unmake_ddb, resp["Responses"]["s3aliases_dentries"])
-    ))
+    return dict(
+        (
+            (item["key"], bytes(item["inode"]))
+            for item in map(unmake_ddb, resp["Responses"]["s3aliases_dentries"])
+        )
+    )
+
 
 def list_objects():
     s3_keys = map(lambda o: o.key, DENTRIES_BUCKET.objects.all())
@@ -318,28 +337,31 @@ def list_objects():
             print(f"Last Modified: {data_object.last_modified}")
 
 
+def main():
+    client("sts").get_caller_identity()
+    ops = dict(
+        get=get_object,
+        put=put_object,
+        delete=delete_object,
+        copy=copy_object,
+        list=list_objects,
+    )
+    while True:
+        try:
+            cmd = input("> ")
+        except EOFError:
+            break
+
+        if not cmd:
+            break
+
+        try:
+            op_name, *args = cmd.split()
+            op = ops[op_name]
+            op(*args)
+        except:
+            traceback.print_exc()
 
 
-client("sts").get_caller_identity()
-ops = dict(
-    get=get_object,
-    put=put_object,
-    delete=delete_object,
-    copy=copy_object,
-    list=list_objects,
-)
-while True:
-    try:
-        cmd = input("> ")
-    except EOFError:
-        break
-
-    if not cmd:
-        break
-
-    try:
-        op_name, *args = cmd.split()
-        op = ops[op_name]
-        op(*args)
-    except:
-        traceback.print_exc()
+if __name__ == "__main__":
+    raise SystemExit(main())
